@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pdfplumber
+reportlab
+pytest
+python-multipart
