@@ -36,3 +36,17 @@ def test_extract_text_from_file():
     print("\n--- Extracted Text ---")
     print(result)
     print("----------------------")
+
+def test_extract_transaction():
+    # Arrange
+    pdf_path = Path(__file__).parent / "temp"/"sample.pdf"
+
+    extractor = PDFExtractor()
+
+    # Act
+    result = extractor.extract_transaction_table(str(pdf_path))
+
+    # Print the extracted text
+    print("\n--- Extracted Text ---")
+    print(result)
+    print("----------------------")
