@@ -1,0 +1,61 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before app bundle is created, so as to inject path information which
+#  will be used to find necessary libs during runtime.
+.PyInstaller
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.pytest_cache/
+
+# pylint
+.pylintrc
+
+# Sphinx documentation
+docs/_build/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Environments
+.env
+venv/
+env/
+veno/
+
+# macOS specific files
+.DS_Store
+
+# Other files/dirs to exclude
+logs/
+temp/
