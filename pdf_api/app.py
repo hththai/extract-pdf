@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from services.pdf_extractor import PDFExtractor
@@ -17,6 +17,7 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 extractor = PDFExtractor()
+router = APIRouter(prefix="/api")
 
 PDF_MAGIC = b"%PDF"
 
@@ -28,7 +29,7 @@ async def read_validated_pdf(file: UploadFile) -> bytes:
         raise HTTPException(status_code=400, detail="File must be a PDF")
     return data
 
-@app.post(
+@router.post(
     "/extract-text",
     responses={
         400: {"description": "Not a PDF"},
@@ -51,7 +52,7 @@ async def extract_text(file: Annotated[UploadFile, File()]):
     finally:
         os.unlink(tmp_path)
 
-@app.post(
+@router.post(
     "/extract-csv",
     responses={
         400: {"description": "Not a PDF or validation failed"},
@@ -85,6 +86,8 @@ async def extract_csv(file: Annotated[UploadFile, File()]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/status")
+@router.get("/status")
 async def health_check():
     return {"status": "OK"}
+
+app.include_router(router)
