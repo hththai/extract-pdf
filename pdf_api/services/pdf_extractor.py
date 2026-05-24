@@ -1,8 +1,22 @@
 import pdfplumber
 from pathlib import Path
 import pandas as pd
+from datetime import datetime
 
 class PDFExtractor:
+
+    def is_valid_date(self, date_str: str) -> bool:
+        if not date_str or not date_str[0].isdigit():
+            return False
+
+        for fmt in ("%d %B %Y", "%d %b %Y", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y"):
+            try:
+                datetime.strptime(date_str, fmt)
+                return True
+            except ValueError:
+                continue
+        return False
+
     def extract_text(self, file_path: str) -> str:
         path = Path(file_path)
 
@@ -99,17 +113,7 @@ class PDFExtractor:
                         results[-1]["Transaction details"] += " " + details
                         continue
 
-                    # Simple validation for new row
-                    if date and (amount or balance):
-                        results.append({
-                            "Date": date,
-                            "Transaction details": details,
-                            "Amount": amount,
-                            "Balance": balance
-                        })
-
-                    # ✅ simple validation
-                    if date and (amount or balance):
+                    if self.is_valid_date(date) and (amount or balance):
                         results.append({
                             "Date": date,
                             "Transaction details": details,
@@ -118,7 +122,8 @@ class PDFExtractor:
                         })
 
         return pd.DataFrame(results)
-
+    
+    
     def convert_amount_balance_to_numbers(self, df: pd.DataFrame) -> pd.DataFrame:
         def extract_number(value):
             if not isinstance(value, str) or value.strip() == "":
@@ -154,4 +159,5 @@ class PDFExtractor:
         df["Balance_num"] = df["Balance"].apply(extract_number)
 
         return df
+    
 
