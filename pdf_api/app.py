@@ -1,11 +1,12 @@
+from typing import Annotated
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from services.pdf_extractor import PDFExtractor
 from config import settings
 import io
+import os
 import tempfile
-import shutil
 
 app = FastAPI()
 app.add_middleware(
@@ -17,37 +18,59 @@ app.add_middleware(
 )
 extractor = PDFExtractor()
 
-@app.post("/extract-text")
-async def extract_text(file: UploadFile = File(...)):
-    if file.content_type != "application/pdf":
+PDF_MAGIC = b"%PDF"
+
+async def read_validated_pdf(file: UploadFile) -> bytes:
+    data = await file.read()
+    if len(data) > settings.MAX_PDF_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_PDF_BYTES} bytes")
+    if not data.startswith(PDF_MAGIC):
         raise HTTPException(status_code=400, detail="File must be a PDF")
+    return data
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
-
+@app.post(
+    "/extract-text",
+    responses={
+        400: {"description": "Not a PDF"},
+        413: {"description": "File too large"},
+        500: {"description": "Extraction error"},
+    },
+)
+async def extract_text(file: Annotated[UploadFile, File()]):
+    data = await read_validated_pdf(file)
+    fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
     try:
         text = extractor.extract_text(tmp_path)
         return {"text": text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.unlink(tmp_path)
 
-@app.post("/extract-csv")
-async def extract_csv(file: UploadFile = File(...)):
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
+@app.post(
+    "/extract-csv",
+    responses={
+        400: {"description": "Not a PDF or validation failed"},
+        413: {"description": "File too large"},
+        500: {"description": "Extraction error"},
+    },
+)
+async def extract_csv(file: Annotated[UploadFile, File()]):
+    data = await read_validated_pdf(file)
     try:
-        pdf_buffer = io.BytesIO(await file.read())
+        pdf_buffer = io.BytesIO(data)
         df = extractor.extract_transaction_table(pdf_buffer)
         df = extractor.convert_amount_balance_to_numbers(df)
 
-        if not extractor.is_valid_result(df):
+        validation_status = extractor.is_valid_result(df)
+        if not validation_status:
             raise HTTPException(status_code=400, detail="Validation failed")
 
-        validation_status = extractor.is_valid_result(df)
-        csv_name = f"true_validation_{len(df)}.csv" if validation_status else f"false_validation_{len(df)}.csv"
-
+        csv_name = f"true_validation_{len(df)}.csv"
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)

@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     ENV: str = "dev"
-    CORS_ORIGINS: str = "*"
+    CORS_ORIGINS: str = "http://localhost"  # must be explicitly set in production
     MAX_PDF_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

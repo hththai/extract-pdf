@@ -1,8 +1,6 @@
 fastapi
 uvicorn
 pdfplumber
-reportlab
-pytest
 python-multipart
 pandas
 pydantic-settings
