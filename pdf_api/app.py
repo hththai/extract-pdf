@@ -3,12 +3,18 @@ from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from services.pdf_extractor import PDFExtractor
+from middleware.access_log import AccessLogMiddleware
 from config import settings
 import io
 import os
 import tempfile
 
 app = FastAPI()
+app.add_middleware(
+    AccessLogMiddleware,
+    log_dir=settings.LOG_DIR,
+    retention_days=settings.LOG_RETENTION_DAYS,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
