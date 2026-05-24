@@ -10,7 +10,7 @@ class PDFExtractor:
     @dataclass(frozen=True)
     class _ColumnBounds:
         date_max: float = 120
-        details_max: float = 300
+        details_max: float = 350
         amount_max: float = 450
 
     COLUMN_BOUNDS = _ColumnBounds()
@@ -191,9 +191,13 @@ class PDFExtractor:
 
         # Opening balance = first balance BEFORE first transaction
         opening_balance = df.iloc[0][balance_col] - df.iloc[0][amount_col]
-
+    
         # Expected closing balance
         expected_balance = opening_balance + sum_amount
+
+        # debug
+        print(f"LAST BALANCE: {last_balance}")
+        print(f"EXPECTED BALANCE: {expected_balance}")
 
         # Compare with tolerance for floating point
         return abs(expected_balance - last_balance) < 0.01

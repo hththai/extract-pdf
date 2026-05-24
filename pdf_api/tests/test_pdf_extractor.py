@@ -39,7 +39,7 @@ def test_extract_text_from_file():
 
 def test_extract_transaction():
     # Arrange
-    pdf_path = Path(__file__).parent / "temp"/"sample.pdf"
+    pdf_path = Path(__file__).parent / "temp"/"TransactionSummary.pdf"
 
     extractor = PDFExtractor()
     # Act
@@ -50,6 +50,20 @@ def test_extract_transaction():
     # Print the extracted text
     print("\n--- Extracted Text ---")
     print(result)
+    print("----------------------")
+
+    # Convert the result to a DataFrame and save it as a CSV file
+    import pandas as pd
+    df = pd.DataFrame(result)
+    csv_path = Path(__file__).parent / "temp"/"result"
+    if not csv_path.exists():
+        csv_path.mkdir(parents=True, exist_ok=True)
+    csv_path /= "extracted_transactions.csv"
+    df.to_csv(csv_path, index=False)
+
+    # Print the path of the saved CSV file
+    print("\n--- Saved CSV File ---")
+    print(str(csv_path))
     print("----------------------")
 
     result_validate = extractor.is_valid_result(result)
