@@ -160,4 +160,28 @@ class PDFExtractor:
 
         return df
     
+    # Validate result if it total balance match.
+    def result_validation(
+        self,
+        df: pd.DataFrame,
+        amount_col: str = "Amount_num",
+        balance_col: str = "Balance_num",
+    ) -> bool:
+        if df.empty:
+            return False
+
+        # Closing balance (last row)
+        last_balance = df.iloc[-1][balance_col]
+
+        # Sum of all transaction amounts
+        sum_amount = df[amount_col].sum()
+
+        # Opening balance = first balance BEFORE first transaction
+        opening_balance = df.iloc[0][balance_col] - df.iloc[0][amount_col]
+
+        # Expected closing balance
+        expected_balance = opening_balance + sum_amount
+
+        # Compare with tolerance for floating point
+        return abs(expected_balance - last_balance) < 0.01
 
