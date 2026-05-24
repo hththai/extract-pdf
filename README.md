@@ -9,8 +9,8 @@ This project aims to extract OCR transaction data from PDF files using OCR techn
 
 # How to run
 1. Clone into Dockge or Docker
-   git clone 
-   cd ocr
+    git clone \
+    cd ocr
 2. Create your .env files
 
     cp .env.example .env
