@@ -52,7 +52,7 @@ def test_extract_transaction():
     print(result)
     print("----------------------")
 
-    result_validate = extractor.result_validation(result)
+    result_validate = extractor.is_valid_result(result)
 
     assert result_validate, "Transaction table validation failed" 
     

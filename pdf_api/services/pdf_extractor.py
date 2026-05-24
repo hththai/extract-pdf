@@ -51,7 +51,7 @@ class PDFExtractor:
                 if not {"text", "x0", "top"}.issubset(df.columns):
                     continue
 
-                # ✅ group rows
+                # group rows
                 df["row"] = df["top"].round(1)
                 rows = df.groupby("row")
 
@@ -68,23 +68,23 @@ class PDFExtractor:
 
                     line_text = " ".join(texts)
 
-                    # ✅ detect header
+                    # detect header
                     if not table_started:
                         if "Date" in line_text and "Transaction" in line_text:
                             table_started = True
                         continue
 
-                    # ✅ stop when reaching footer/summary
+                    # stop when reaching footer/summary
                     if "Total" in line_text:
                         break
 
-                    # ✅ initialize row
+                    # initialize row
                     date = ""
                     details = ""
                     amount = ""
                     balance = ""
 
-                    # ✅ column boundaries (tune if needed)
+                    # column boundaries (tune if needed)
                     for t, x in zip(texts, xs):
                         if x < 120:
                             date += t + " "
@@ -95,7 +95,7 @@ class PDFExtractor:
                         else:
                             balance += t + " "
 
-                    # ✅ clean
+                    # clean
                     date = date.strip()
                     details = details.strip()
                     amount = amount.strip()
@@ -161,7 +161,7 @@ class PDFExtractor:
         return df
     
     # Validate result if it total balance match.
-    def result_validation(
+    def is_valid_result(
         self,
         df: pd.DataFrame,
         amount_col: str = "Amount_num",
