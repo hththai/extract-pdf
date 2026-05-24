@@ -1,5 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from services.pdf_extractor import PDFExtractor
+import io
 import tempfile
 import shutil
 
@@ -11,7 +13,6 @@ async def extract_text(file: UploadFile = File(...)):
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
-    # Save uploaded file to a temporary location
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
@@ -22,7 +23,36 @@ async def extract_text(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-## health check api
+@app.post("/extract-csv")
+async def extract_csv(file: UploadFile = File(...)):
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    try:
+        pdf_buffer = io.BytesIO(await file.read())
+        df = extractor.extract_transaction_table(pdf_buffer)
+        df = extractor.convert_amount_balance_to_numbers(df)
+
+        if not extractor.is_valid_result(df):
+            raise HTTPException(status_code=400, detail="Validation failed")
+
+        validation_status = extractor.is_valid_result(df)
+        csv_name = f"true_validation_{len(df)}.csv" if validation_status else f"false_validation_{len(df)}.csv"
+
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
+
+        return StreamingResponse(
+            iter([csv_buffer.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={csv_name}"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/status")
 async def health_check():
     return {"status": "OK"}

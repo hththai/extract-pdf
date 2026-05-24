@@ -45,9 +45,9 @@ class PDFExtractor:
 
         return "\n".join(text_chunks).strip()
 
-    def extract_transaction_table(self, pdf_path: str) -> pd.DataFrame:
+    def extract_transaction_table(self, pdf_source) -> pd.DataFrame:
         results = []
-        with pdfplumber.open(pdf_path) as pdf:
+        with pdfplumber.open(pdf_source) as pdf:
             for page in pdf.pages:
                 self._extract_page_transactions(page, results)
         return pd.DataFrame(results)
@@ -196,8 +196,8 @@ class PDFExtractor:
         expected_balance = opening_balance + sum_amount
 
         # debug
-        print(f"LAST BALANCE: {last_balance}")
-        print(f"EXPECTED BALANCE: {expected_balance}")
+        # print(f"LAST BALANCE: {last_balance}")
+        # print(f"EXPECTED BALANCE: {expected_balance}")
 
         # Compare with tolerance for floating point
         return abs(expected_balance - last_balance) < 0.01
