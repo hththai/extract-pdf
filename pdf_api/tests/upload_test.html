@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF Extract CSV</title>
+  <style>
+    body { font-family: sans-serif; max-width: 480px; margin: 60px auto; padding: 0 16px; }
+    h2 { margin-bottom: 24px; }
+    input[type="file"] { display: block; margin-bottom: 16px; }
+    button { padding: 8px 20px; cursor: pointer; }
+    #status { margin-top: 20px; font-size: 14px; }
+    .ok  { color: green; }
+    .err { color: red; }
+  </style>
+</head>
+<body>
+  <h2>Upload PDF → Extract CSV</h2>
+  <input type="file" id="pdf-input" accept="application/pdf">
+  <button onclick="upload()">Upload</button>
+  <div id="status"></div>
+
+  <script>
+    async function upload() {
+      const input = document.getElementById('pdf-input');
+      const status = document.getElementById('status');
+
+      if (!input.files.length) {
+        status.className = 'err';
+        status.textContent = 'Please select a PDF file.';
+        return;
+      }
+
+      const file = input.files[0];
+      status.className = '';
+      status.textContent = 'Processing...';
+
+      const form = new FormData();
+      form.append('file', file);
+
+      try {
+        const res = await fetch('http://127.0.0.1:8000/extract-csv', {
+          method: 'POST',
+          body: form,
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          status.className = 'err';
+          status.textContent = `Error ${res.status}: ${err.detail}`;
+          return;
+        }
+
+        // Grab filename from Content-Disposition header
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename=([^\s;]+)/);
+        const filename = match ? match[1] : 'output.csv';
+
+        // Trigger browser download
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        status.className = 'ok';
+        status.textContent = `Done — downloaded ${filename}`;
+      } catch (e) {
+        status.className = 'err';
+        status.textContent = `Request failed: ${e.message}`;
+      }
+    }
+  </script>
+</body>
+</html>
