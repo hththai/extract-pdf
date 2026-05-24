@@ -202,3 +202,12 @@ class PDFExtractor:
         # Compare with tolerance for floating point
         return abs(expected_balance - last_balance) < 0.01
 
+    def save_validated_csv(self, df: pd.DataFrame, file_path: str) -> None:
+        validation_status = self.is_valid_result(df)
+        if validation_status:
+            csv_name = f"true_validation_{len(df)}.csv"
+        else:
+            csv_name = f"false_validation_{len(df)}.csv"
+
+        output_file = Path(file_path)/csv_name
+        df.to_csv(output_file, index=False)

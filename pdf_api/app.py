@@ -21,3 +21,8 @@ async def extract_text(file: UploadFile = File(...)):
         return {"text": text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+## health check api
+@app.get("/status")
+async def health_check():
+    return {"status": "OK"}
