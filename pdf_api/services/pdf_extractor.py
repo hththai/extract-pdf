@@ -2,8 +2,18 @@ import pdfplumber
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
+from dataclasses import dataclass
+
 
 class PDFExtractor:
+
+    @dataclass(frozen=True)
+    class _ColumnBounds:
+        date_max: float = 120
+        details_max: float = 300
+        amount_max: float = 450
+
+    COLUMN_BOUNDS = _ColumnBounds()
 
     def is_valid_date(self, date_str: str) -> bool:
         if not date_str or not date_str[0].isdigit():
@@ -37,92 +47,95 @@ class PDFExtractor:
 
     def extract_transaction_table(self, pdf_path: str) -> pd.DataFrame:
         results = []
-
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-
-                words = page.extract_words(use_text_flow=True)
-
-                if not words:
-                    continue
-
-                df = pd.DataFrame(words)
-
-                if not {"text", "x0", "top"}.issubset(df.columns):
-                    continue
-
-                # group rows
-                df["row"] = df["top"].round(1)
-                rows = df.groupby("row")
-
-                table_started = False
-
-                for _, group in rows:
-                    row_sorted = group.sort_values("x0")
-
-                    texts = list(row_sorted["text"])
-                    xs = list(row_sorted["x0"])
-
-                    if not texts:
-                        continue
-
-                    line_text = " ".join(texts)
-
-                    # detect header
-                    if not table_started:
-                        if "Date" in line_text and "Transaction" in line_text:
-                            table_started = True
-                        continue
-
-                    # stop when reaching footer/summary
-                    if "Total" in line_text:
-                        break
-
-                    # initialize row
-                    date = ""
-                    details = ""
-                    amount = ""
-                    balance = ""
-
-                    # column boundaries (tune if needed)
-                    for t, x in zip(texts, xs):
-                        if x < 120:
-                            date += t + " "
-                        elif x < 300:
-                            details += t + " "
-                        elif x < 450:
-                            amount += t + " "
-                        else:
-                            balance += t + " "
-
-                    # clean
-                    date = date.strip()
-                    details = details.strip()
-                    amount = amount.strip()
-                    balance = balance.strip()
-
-                    # Detect continuation line (multi-line description)
-                    is_continuation = (
-                        date == "" and
-                        amount == "" and
-                        balance == "" and
-                        details != ""
-                    )
-
-                    if is_continuation and results:
-                        results[-1]["Transaction details"] += " " + details
-                        continue
-
-                    if self.is_valid_date(date) and (amount or balance):
-                        results.append({
-                            "Date": date,
-                            "Transaction details": details,
-                            "Amount": amount,
-                            "Balance": balance
-                        })
-
+                self._extract_page_transactions(page, results)
         return pd.DataFrame(results)
-    
+
+    def _extract_page_transactions(self, page, results: list) -> None:
+        words = page.extract_words(use_text_flow=True)
+        if not words:
+            return
+
+        df = pd.DataFrame(words)
+        if not {"text", "x0", "top"}.issubset(df.columns):
+            return
+
+        df["row"] = df["top"].round(1)
+        table_started = False
+
+        for _, group in df.groupby("row"):
+            row_data = self._parse_row(group)
+
+            if not table_started:
+                table_started = self._is_header_row(row_data["line_text"])
+                continue
+
+            if self._is_footer_row(row_data["line_text"]):
+                break
+
+            if self._is_continuation_row(row_data, results):
+                results[-1]["Transaction details"] += " " + row_data["details"]
+                continue
+
+            if self._is_valid_transaction(row_data):
+                results.append(self._make_transaction(row_data))
+
+    def _make_transaction(self, row_data: dict) -> dict:
+        return {
+            "Date": row_data["date"],
+            "Transaction details": row_data["details"],
+            "Amount": row_data["amount"],
+            "Balance": row_data["balance"],
+        }
+
+    def _parse_row(self, group):
+        row_sorted = group.sort_values("x0")
+        texts = list(row_sorted["text"])
+        xs = list(row_sorted["x0"])
+
+        date, details, amount, balance = "", "", "", ""
+
+        for t, x in zip(texts, xs):
+            if x < self.COLUMN_BOUNDS.date_max:
+                date += t + " "
+            elif x < self.COLUMN_BOUNDS.details_max:
+                details += t + " "
+            elif x < self.COLUMN_BOUNDS.amount_max:
+                amount += t + " "
+            else:
+                balance += t + " "
+
+        return {
+            "date": date.strip(),
+            "details": details.strip(),
+            "amount": amount.strip(),
+            "balance": balance.strip(),
+            "line_text": " ".join(texts)
+        }
+
+
+    def _is_header_row(self, line_text: str) -> bool:
+        return "Date" in line_text and "Transaction" in line_text
+
+
+    def _is_footer_row(self, line_text: str) -> bool:
+        return "Total" in line_text
+
+
+    def _is_continuation_row(self, row, results) -> bool:
+        return (
+            row["date"] == "" and
+            row["amount"] == "" and
+            row["balance"] == "" and
+            row["details"] != "" and
+            len(results) > 0
+        )
+
+
+    def _is_valid_transaction(self, row) -> bool:
+        return self.is_valid_date(row["date"]) and (row["amount"] or row["balance"])
+
     
     def convert_amount_balance_to_numbers(self, df: pd.DataFrame) -> pd.DataFrame:
         def extract_number(value):
