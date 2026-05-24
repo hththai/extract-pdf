@@ -69,17 +69,3 @@ def test_extract_transaction():
     result_validate = extractor.is_valid_result(result)
 
     assert result_validate, "Transaction table validation failed" 
-    
-    # Convert the result to a DataFrame and save it as a CSV file
-    # import pandas as pd
-    # df = pd.DataFrame(result)
-    # csv_path = Path(__file__).parent / "temp"/"result"
-    # if not csv_path.exists():
-    #     csv_path.mkdir(parents=True, exist_ok=True)
-    # csv_path /= "extracted_transactions.csv"
-    # df.to_csv(csv_path, index=False)
-
-    # # Print the path of the saved CSV file
-    # print("\n--- Saved CSV File ---")
-    # print(str(csv_path))
-    # print("----------------------")
