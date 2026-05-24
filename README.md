@@ -5,6 +5,7 @@ This project aims to extract OCR transaction data from PDF files using OCR techn
 # How to use
     Client upload pdf --> Server OCR -->|using in-memory|--> CSV file
     * validate the balance result and return validation with total role as name.
+    * No store files on server
 
 # How to run
 1. Clone into Dockge or Docker
