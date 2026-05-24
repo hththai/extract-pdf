@@ -46,7 +46,25 @@ def test_extract_transaction():
     # Act
     result = extractor.extract_transaction_table(str(pdf_path))
 
+    result = extractor.convert_amount_balance_to_numbers(result)
+
     # Print the extracted text
     print("\n--- Extracted Text ---")
     print(result)
+    print("----------------------")
+    
+
+
+    # Convert the result to a DataFrame and save it as a CSV file
+    import pandas as pd
+    df = pd.DataFrame(result)
+    csv_path = Path(__file__).parent / "temp"/"result"
+    if not csv_path.exists():
+        csv_path.mkdir(parents=True, exist_ok=True)
+    csv_path /= "extracted_transactions.csv"
+    df.to_csv(csv_path, index=False)
+
+    # Print the path of the saved CSV file
+    print("\n--- Saved CSV File ---")
+    print(str(csv_path))
     print("----------------------")

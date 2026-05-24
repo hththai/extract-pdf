@@ -1,5 +1,6 @@
 import pdfplumber
 from pathlib import Path
+import pandas as pd
 
 class PDFExtractor:
     def extract_text(self, file_path: str) -> str:
@@ -86,6 +87,27 @@ class PDFExtractor:
                     amount = amount.strip()
                     balance = balance.strip()
 
+                    # Detect continuation line (multi-line description)
+                    is_continuation = (
+                        date == "" and
+                        amount == "" and
+                        balance == "" and
+                        details != ""
+                    )
+
+                    if is_continuation and results:
+                        results[-1]["Transaction details"] += " " + details
+                        continue
+
+                    # Simple validation for new row
+                    if date and (amount or balance):
+                        results.append({
+                            "Date": date,
+                            "Transaction details": details,
+                            "Amount": amount,
+                            "Balance": balance
+                        })
+
                     # ✅ simple validation
                     if date and (amount or balance):
                         results.append({
@@ -96,3 +118,40 @@ class PDFExtractor:
                         })
 
         return pd.DataFrame(results)
+
+    def convert_amount_balance_to_numbers(self, df: pd.DataFrame) -> pd.DataFrame:
+        def extract_number(value):
+            if not isinstance(value, str) or value.strip() == "":
+                return None
+
+            v = value.strip()
+
+            # Remove currency symbols and commas
+            v = v.replace("$", "").replace(",", "")
+
+            # Handle CR/DR (credit/debit)
+            if v.endswith("CR"):
+                v = v[:-2].strip()
+            if v.endswith("DR"):
+                v = "-" + v[:-2].strip()
+
+            # Normalize negative formats
+            # -$123.45 → -123.45
+            # $-123.45 → -123.45
+            v = v.replace(" ", "")
+            if v.startswith("-"):
+                sign = -1
+                v = v[1:]
+            else:
+                sign = 1
+
+            try:
+                return sign * float(v)
+            except ValueError:
+                return None
+
+        df["Amount_num"] = df["Amount"].apply(extract_number)
+        df["Balance_num"] = df["Balance"].apply(extract_number)
+
+        return df
+

@@ -4,3 +4,4 @@ pdfplumber
 reportlab
 pytest
 python-multipart
+pandas
