@@ -4,3 +4,4 @@ pdfplumber
 python-multipart
 pandas
 pydantic-settings
+httpx
