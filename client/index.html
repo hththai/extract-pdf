@@ -26,25 +26,50 @@
       padding: 2rem;
     }
 
+    .page {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 480px;
+    }
+
     .card {
       background: #fff;
       border-radius: 16px;
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
       padding: 2.5rem 2rem;
       width: 100%;
-      max-width: 480px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
     }
 
     h1 {
       font-size: 1.5rem;
       font-weight: 700;
-      margin-bottom: 0.25rem;
     }
 
     .subtitle {
       font-size: 0.9rem;
       color: #6e6e73;
       margin-bottom: 2rem;
+    }
+
+    .trial-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 0.2rem 0.55rem;
+      border-radius: 99px;
+      background: #fff3cd;
+      color: #92600a;
+      border: 1px solid #f5c542;
+      flex-shrink: 0;
     }
 
     /* Drop zone */
@@ -224,150 +249,203 @@
 </head>
 
 <body>
-  <div class="card">
-    <h1>Bank Statement Extractor</h1>
-    <p class="subtitle">Upload a PDF bank statement to extract transactions as CSV</p>
+  <div class="page">
 
-    <div class="drop-zone" id="dropZone">
-      <input type="file" id="fileInput" accept=".pdf,application/pdf" />
-      <div class="drop-icon">📄</div>
-      <div class="drop-label">Drop your PDF here</div>
-      <div class="drop-hint">or click to browse — PDF only, max 10 MB</div>
+    <!-- PDF Extractor -->
+    <div class="card">
+      <div class="card-header">
+        <h1>Bank Statement Extractor</h1>
+      </div>
+      <p class="subtitle">Upload a PDF bank statement to extract transactions as CSV</p>
+
+      <div class="drop-zone" id="pdfDropZone">
+        <input type="file" id="pdfFileInput" accept=".pdf,application/pdf" />
+        <div class="drop-icon">📄</div>
+        <div class="drop-label">Drop your PDF here</div>
+        <div class="drop-hint">or click to browse — PDF only, max 10 MB</div>
+      </div>
+
+      <div class="file-preview" id="pdfFilePreview">
+        <span>📎</span>
+        <span class="file-name" id="pdfFileName"></span>
+        <button class="remove-btn" id="pdfRemoveBtn" title="Remove file">✕</button>
+      </div>
+
+      <button class="submit-btn" id="pdfSubmitBtn" disabled>Extract CSV</button>
+      <div class="status" id="pdfStatus"></div>
     </div>
 
-    <div class="file-preview" id="filePreview">
-      <span>📎</span>
-      <span class="file-name" id="fileName"></span>
-      <button class="remove-btn" id="removeBtn" title="Remove file">✕</button>
+    <!-- Transaction Classifier -->
+    <div class="card">
+      <div class="card-header">
+        <h1>Transaction Classifier</h1>
+        <span class="trial-badge">Trial</span>
+      </div>
+      <p class="subtitle">Upload a CSV of transactions to classify each row using local AI</p>
+
+      <div class="drop-zone" id="csvDropZone">
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" />
+        <div class="drop-icon">📊</div>
+        <div class="drop-label">Drop your CSV here</div>
+        <div class="drop-hint">or click to browse — CSV only, max 5 MB</div>
+      </div>
+
+      <div class="file-preview" id="csvFilePreview">
+        <span>📎</span>
+        <span class="file-name" id="csvFileName"></span>
+        <button class="remove-btn" id="csvRemoveBtn" title="Remove file">✕</button>
+      </div>
+
+      <button class="submit-btn" id="csvSubmitBtn" disabled>Classify Transactions</button>
+      <div class="status" id="csvStatus"></div>
     </div>
 
-    <button class="submit-btn" id="submitBtn" disabled>Extract CSV</button>
-
-    <div class="status" id="status"></div>
   </div>
 
   <script>
     const API_BASE = "${API_URL}";
 
-    const dropZone = document.getElementById("dropZone");
-    const fileInput = document.getElementById("fileInput");
-    const filePreview = document.getElementById("filePreview");
-    const fileNameEl = document.getElementById("fileName");
-    const removeBtn = document.getElementById("removeBtn");
-    const submitBtn = document.getElementById("submitBtn");
-    const statusEl = document.getElementById("status");
+    function createUploadWidget({ dropZoneId, fileInputId, filePreviewId, fileNameId, removeBtnId, submitBtnId, statusId, accept, maxBytes, maxLabel, validate, endpoint, loadingMsg, onSuccess }) {
+      const dropZone = document.getElementById(dropZoneId);
+      const fileInput = document.getElementById(fileInputId);
+      const filePreview = document.getElementById(filePreviewId);
+      const fileNameEl = document.getElementById(fileNameId);
+      const removeBtn = document.getElementById(removeBtnId);
+      const submitBtn = document.getElementById(submitBtnId);
+      const statusEl = document.getElementById(statusId);
 
-    let selectedFile = null;
+      let selectedFile = null;
 
-    function setFile(file) {
-      if (!file || file.type !== "application/pdf") {
-        showStatus("error", "Please select a valid PDF file.");
-        return;
+      function showStatus(type, html) {
+        statusEl.className = `status visible ${type}`;
+        statusEl.innerHTML = html;
       }
-      if (file.size > 10 * 1024 * 1024) {
-        showStatus("error", "File is too large (max 10 MB).");
-        return;
+
+      function clearStatus() {
+        statusEl.className = "status";
+        statusEl.innerHTML = "";
       }
-      selectedFile = file;
-      fileNameEl.textContent = file.name;
-      filePreview.classList.add("visible");
-      submitBtn.disabled = false;
-      clearStatus();
-    }
 
-    function clearFile() {
-      selectedFile = null;
-      fileInput.value = "";
-      filePreview.classList.remove("visible");
-      submitBtn.disabled = true;
-      clearStatus();
-    }
-
-    function showStatus(type, html) {
-      statusEl.className = `status visible ${type}`;
-      statusEl.innerHTML = html;
-    }
-
-    function clearStatus() {
-      statusEl.className = "status";
-      statusEl.innerHTML = "";
-    }
-
-    // Drag and drop
-    dropZone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropZone.classList.add("drag-over");
-    });
-
-    dropZone.addEventListener("dragleave", () => {
-      dropZone.classList.remove("drag-over");
-    });
-
-    dropZone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropZone.classList.remove("drag-over");
-      const file = e.dataTransfer.files[0];
-      if (file) setFile(file);
-    });
-
-    fileInput.addEventListener("change", () => {
-      if (fileInput.files[0]) setFile(fileInput.files[0]);
-    });
-
-    removeBtn.addEventListener("click", clearFile);
-
-    // Submit
-    submitBtn.addEventListener("click", async () => {
-      if (!selectedFile) return;
-
-      submitBtn.disabled = true;
-      showStatus("loading", `<span class="spinner"></span>Extracting transactions…`);
-
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      try {
-        const res = await fetch(`${API_BASE}/extract-csv`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: res.statusText }));
-          throw new Error(err.detail || "Extraction failed");
+      function setFile(file) {
+        const err = validate(file);
+        if (err) { showStatus("error", err); return; }
+        if (file.size > maxBytes) {
+          showStatus("error", `File is too large (max ${maxLabel}).`);
+          return;
         }
+        selectedFile = file;
+        fileNameEl.textContent = file.name;
+        filePreview.classList.add("visible");
+        submitBtn.disabled = false;
+        clearStatus();
+      }
 
-        // Parse validation status and row count from Content-Disposition filename
-        const disposition = res.headers.get("Content-Disposition") || "";
-        const match = disposition.match(/filename=(\S+)/);
-        const csvName = match ? match[1] : "transactions.csv";
+      function clearFile() {
+        selectedFile = null;
+        fileInput.value = "";
+        filePreview.classList.remove("visible");
+        submitBtn.disabled = true;
+        clearStatus();
+      }
 
-        const isValid = csvName.startsWith("true_validation");
-        const rowMatch = csvName.match(/_(\d+)\.csv$/);
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("drag-over");
+      });
+      dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("drag-over");
+        if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+      });
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files[0]) setFile(fileInput.files[0]);
+      });
+      removeBtn.addEventListener("click", clearFile);
+
+      submitBtn.addEventListener("click", async () => {
+        if (!selectedFile) return;
+        submitBtn.disabled = true;
+        showStatus("loading", `<span class="spinner"></span>${loadingMsg}`);
+
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+
+        try {
+          const res = await fetch(`${API_BASE}/${endpoint}`, { method: "POST", body: formData });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error(err.detail || "Request failed");
+          }
+
+          const disposition = res.headers.get("Content-Disposition") || "";
+          const match = disposition.match(/filename=(\S+)/);
+          const fileName = match ? match[1] : "result.csv";
+
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = fileName;
+          a.click();
+          URL.revokeObjectURL(url);
+
+          showStatus("success", onSuccess(fileName));
+        } catch (err) {
+          showStatus("error", `Error: ${err.message}`);
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    }
+
+    // PDF extractor widget
+    createUploadWidget({
+      dropZoneId: "pdfDropZone",
+      fileInputId: "pdfFileInput",
+      filePreviewId: "pdfFilePreview",
+      fileNameId: "pdfFileName",
+      removeBtnId: "pdfRemoveBtn",
+      submitBtnId: "pdfSubmitBtn",
+      statusId: "pdfStatus",
+      maxBytes: 10 * 1024 * 1024,
+      maxLabel: "10 MB",
+      validate: (file) => file.type === "application/pdf" ? null : "Please select a valid PDF file.",
+      endpoint: "extract-csv",
+      loadingMsg: "Extracting transactions…",
+      onSuccess: (fileName) => {
+        const isValid = fileName.startsWith("true_validation");
+        const rowMatch = fileName.match(/_(\d+)\.csv$/);
         const rowCount = rowMatch ? rowMatch[1] : "?";
-
-        // Trigger download
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = csvName;
-        a.click();
-        URL.revokeObjectURL(url);
-
         const badge = isValid
           ? `<span class="badge valid">Valid</span>`
           : `<span class="badge invalid">Invalid</span>`;
+        return `Downloaded <strong>${fileName}</strong> — ${rowCount} rows ${badge}`;
+      },
+    });
 
-        showStatus(
-          "success",
-          `Downloaded <strong>${csvName}</strong> — ${rowCount} rows ${badge}`
-        );
-      } catch (err) {
-        showStatus("error", `Error: ${err.message}`);
-      } finally {
-        submitBtn.disabled = false;
-      }
+    // CSV classifier widget
+    createUploadWidget({
+      dropZoneId: "csvDropZone",
+      fileInputId: "csvFileInput",
+      filePreviewId: "csvFilePreview",
+      fileNameId: "csvFileName",
+      removeBtnId: "csvRemoveBtn",
+      submitBtnId: "csvSubmitBtn",
+      statusId: "csvStatus",
+      maxBytes: 5 * 1024 * 1024,
+      maxLabel: "5 MB",
+      validate: (file) => {
+        const ok = file.type === "text/csv" || file.name.endsWith(".csv");
+        return ok ? null : "Please select a valid CSV file.";
+      },
+      endpoint: "classify-csv",
+      loadingMsg: "Classifying transactions… this may take a moment",
+      onSuccess: (fileName) => {
+        const rowMatch = fileName.match(/_(\d+)_classified\.csv$/);
+        const rowCount = rowMatch ? rowMatch[1] : "?";
+        return `Downloaded <strong>${fileName}</strong> — ${rowCount} rows classified`;
+      },
     });
   </script>
 </body>

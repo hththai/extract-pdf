@@ -1,13 +1,16 @@
+import io
+import os
+import tempfile
+from pathlib import Path
 from typing import Annotated
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from services.pdf_extractor import PDFExtractor
+from services.transaction_classifier import TransactionClassifierService
 from middleware.access_log import AccessLogMiddleware
 from config import settings
-import io
-import os
-import tempfile
+import pandas as pd
 
 app = FastAPI()
 app.add_middleware(
@@ -23,9 +26,19 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 extractor = PDFExtractor()
+classifier = TransactionClassifierService()
 router = APIRouter(prefix="/api")
 
 PDF_MAGIC = b"%PDF"
+CSV_MEDIA_TYPE = "text/csv"
+CSV_CONTENT_TYPES = {CSV_MEDIA_TYPE, "application/csv", "text/plain", "application/octet-stream"}
+
+
+def _safe_stem(filename: str | None) -> str:
+    """Strip path components and non-safe characters from an uploaded filename."""
+    stem = Path(filename).stem if filename else "transactions"
+    return "".join(c for c in stem if c.isalnum() or c in "_-") or "transactions"
+
 
 async def read_validated_pdf(file: UploadFile) -> bytes:
     data = await file.read()
@@ -34,6 +47,16 @@ async def read_validated_pdf(file: UploadFile) -> bytes:
     if not data.startswith(PDF_MAGIC):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     return data
+
+
+async def read_validated_csv(file: UploadFile) -> bytes:
+    if file.content_type not in CSV_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+    data = await file.read()
+    if len(data) > settings.MAX_CSV_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_CSV_BYTES} bytes")
+    return data
+
 
 @router.post(
     "/extract-text",
@@ -57,6 +80,7 @@ async def extract_text(file: Annotated[UploadFile, File()]):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.unlink(tmp_path)
+
 
 @router.post(
     "/extract-csv",
@@ -84,7 +108,7 @@ async def extract_csv(file: Annotated[UploadFile, File()]):
 
         return StreamingResponse(
             iter([csv_buffer.getvalue()]),
-            media_type="text/csv",
+            media_type=CSV_MEDIA_TYPE,
             headers={"Content-Disposition": f"attachment; filename={csv_name}"},
         )
     except HTTPException:
@@ -92,8 +116,49 @@ async def extract_csv(file: Annotated[UploadFile, File()]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post(
+    "/classify-csv",
+    responses={
+        400: {"description": "Not a CSV or missing required column"},
+        413: {"description": "File too large"},
+        500: {"description": "Classification error"},
+    },
+)
+async def classify_csv(file: Annotated[UploadFile, File()]):
+    data = await read_validated_csv(file)
+
+    try:
+        df = pd.read_csv(io.BytesIO(data))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not parse CSV file")
+
+    if "Transaction details" not in df.columns:
+        raise HTTPException(
+            status_code=400,
+            detail="CSV must contain a 'Transaction details' column",
+        )
+
+    try:
+        result = await classifier.classify_from_dataframe(df)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    output_name = f"{_safe_stem(file.filename)}_classified.csv"
+    csv_buffer = io.StringIO()
+    result.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
+
+    return StreamingResponse(
+        iter([csv_buffer.getvalue()]),
+        media_type=CSV_MEDIA_TYPE,
+        headers={"Content-Disposition": f"attachment; filename={output_name}"},
+    )
+
+
 @router.get("/status")
 async def health_check():
     return {"status": "OK"}
+
 
 app.include_router(router)
