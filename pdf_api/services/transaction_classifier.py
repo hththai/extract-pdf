@@ -1,7 +1,11 @@
 import asyncio
+from typing import AsyncGenerator
 import httpx
 import pandas as pd
 from config import settings
+
+
+DEFAULT_DETAIL_COLUMN = "Transaction details"
 
 
 class TransactionClassifierService:
@@ -26,7 +30,7 @@ class TransactionClassifierService:
     async def classify_from_csv(
         self,
         file_path: str,
-        detail_column: str = "Transaction details",
+        detail_column: str = DEFAULT_DETAIL_COLUMN,
     ) -> pd.DataFrame:
         df = pd.read_csv(file_path)
         return await self.classify_from_dataframe(df, detail_column)
@@ -34,7 +38,7 @@ class TransactionClassifierService:
     async def classify_from_dataframe(
         self,
         df: pd.DataFrame,
-        detail_column: str = "Transaction details",
+        detail_column: str = DEFAULT_DETAIL_COLUMN,
     ) -> pd.DataFrame:
         if detail_column not in df.columns:
             raise ValueError(f"Column '{detail_column}' not found in DataFrame")
@@ -53,6 +57,31 @@ class TransactionClassifierService:
 
         df["Category"] = list(categories)
         return df
+
+    async def classify_stream(
+        self,
+        df: pd.DataFrame,
+        detail_column: str = DEFAULT_DETAIL_COLUMN,
+    ) -> AsyncGenerator[tuple[list, str], None]:
+        """Yield (row_values, category) per row, processed in concurrent batches.
+
+        Batches results back as they complete so the caller can stream the
+        response — keeping any upstream proxy connection alive.
+        """
+        if detail_column not in df.columns:
+            raise ValueError(f"Column '{detail_column}' not found in DataFrame")
+
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            for start in range(0, len(df), self._concurrency):
+                batch = df.iloc[start:start + self._concurrency]
+
+                categories = await asyncio.gather(
+                    *[self._classify_detail(client, str(row[detail_column]))
+                      for _, row in batch.iterrows()]
+                )
+
+                for (_, row), category in zip(batch.iterrows(), categories):
+                    yield list(row), category
 
     async def _classify_detail(self, client: httpx.AsyncClient, detail: str) -> str:
         payload = {

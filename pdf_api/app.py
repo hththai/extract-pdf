@@ -1,3 +1,4 @@
+import csv
 import io
 import os
 import tempfile
@@ -139,18 +140,23 @@ async def classify_csv(file: Annotated[UploadFile, File()]):
             detail="CSV must contain a 'Transaction details' column",
         )
 
-    try:
-        result = await classifier.classify_from_dataframe(df)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
     output_name = f"{_safe_stem(file.filename)}_classified.csv"
-    csv_buffer = io.StringIO()
-    result.to_csv(csv_buffer, index=False)
-    csv_buffer.seek(0)
+    columns = list(df.columns) + ["Category"]
+
+    async def generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(columns)
+        yield buf.getvalue()
+
+        async for row_values, category in classifier.classify_stream(df):
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(row_values + [category])
+            yield buf.getvalue()
 
     return StreamingResponse(
-        iter([csv_buffer.getvalue()]),
+        generate(),
         media_type=CSV_MEDIA_TYPE,
         headers={"Content-Disposition": f"attachment; filename={output_name}"},
     )
