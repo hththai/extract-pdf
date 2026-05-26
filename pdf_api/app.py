@@ -1,5 +1,6 @@
-import csv
 import io
+import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -36,9 +37,24 @@ CSV_CONTENT_TYPES = {CSV_MEDIA_TYPE, "application/csv", "text/plain", "applicati
 
 
 def _safe_stem(filename: str | None) -> str:
-    """Strip path components and non-safe characters from an uploaded filename."""
     stem = Path(filename).stem if filename else "transactions"
     return "".join(c for c in stem if c.isalnum() or c in "_-") or "transactions"
+
+
+def _json_safe(v):
+    """Convert numpy scalars and NaN to JSON-serialisable Python types."""
+    if hasattr(v, "item"):
+        v = v.item()
+    try:
+        if math.isnan(v):
+            return None
+    except TypeError:
+        pass
+    return v
+
+
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
 
 
 async def read_validated_pdf(file: UploadFile) -> bytes:
@@ -123,7 +139,6 @@ async def extract_csv(file: Annotated[UploadFile, File()]):
     responses={
         400: {"description": "Not a CSV or missing required column"},
         413: {"description": "File too large"},
-        500: {"description": "Classification error"},
     },
 )
 async def classify_csv(file: Annotated[UploadFile, File()]):
@@ -144,21 +159,25 @@ async def classify_csv(file: Annotated[UploadFile, File()]):
     columns = list(df.columns) + ["Category"]
 
     async def generate():
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(columns)
-        yield buf.getvalue()
-
-        async for row_values, category in classifier.classify_stream(df):
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerow(row_values + [category])
-            yield buf.getvalue()
+        try:
+            yield _sse({"type": "start", "total": len(df), "columns": columns})
+            async for row_values, category in classifier.classify_stream(df):
+                yield _sse({
+                    "type": "row",
+                    "values": [_json_safe(v) for v in row_values],
+                    "category": category,
+                })
+            yield _sse({"type": "done", "filename": output_name})
+        except Exception as e:
+            yield _sse({"type": "error", "message": str(e)})
 
     return StreamingResponse(
         generate(),
-        media_type=CSV_MEDIA_TYPE,
-        headers={"Content-Disposition": f"attachment; filename={output_name}"},
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
