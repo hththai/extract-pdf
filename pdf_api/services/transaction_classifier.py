@@ -63,25 +63,30 @@ class TransactionClassifierService:
         df: pd.DataFrame,
         detail_column: str = DEFAULT_DETAIL_COLUMN,
     ) -> AsyncGenerator[tuple[list, str], None]:
-        """Yield (row_values, category) per row, processed in concurrent batches.
+        """Yield (row_values, category) per row, streaming results in order.
 
-        Batches results back as they complete so the caller can stream the
-        response — keeping any upstream proxy connection alive.
+        All tasks are submitted immediately; a semaphore limits how many
+        Ollama requests run at once. Rows are yielded as soon as each task
+        completes, keeping the HTTP connection alive without batch-stall delays.
         """
         if detail_column not in df.columns:
             raise ValueError(f"Column '{detail_column}' not found in DataFrame")
 
+        semaphore = asyncio.Semaphore(self._concurrency)
+
+        async def bounded(detail: str) -> str:
+            async with semaphore:
+                return await self._classify_detail(client, detail)
+
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            for start in range(0, len(df), self._concurrency):
-                batch = df.iloc[start:start + self._concurrency]
+            tasks = [
+                asyncio.create_task(bounded(str(row[detail_column])))
+                for _, row in df.iterrows()
+            ]
 
-                categories = await asyncio.gather(
-                    *[self._classify_detail(client, str(row[detail_column]))
-                      for _, row in batch.iterrows()]
-                )
-
-                for (_, row), category in zip(batch.iterrows(), categories):
-                    yield list(row), category
+            for (_, row), task in zip(df.iterrows(), tasks):
+                category = await task
+                yield list(row), category
 
     async def _classify_detail(self, client: httpx.AsyncClient, detail: str) -> str:
         payload = {
