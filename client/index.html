@@ -397,35 +397,10 @@
       });
     }
 
-    // ── SSE stream reader ─────────────────────────────────────────────────────
-    async function* readSSE(response) {
-      const reader  = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop();
-        for (const part of parts) {
-          const dataLine = part.trim().split("\n").find(l => l.startsWith("data:"));
-          if (dataLine) yield JSON.parse(dataLine.slice(5).trim());
-        }
-      }
-    }
-
-    // ── CSV helpers ───────────────────────────────────────────────────────────
-    function toCSVRow(values) {
-      return values.map(v => {
-        if (v === null || v === undefined) return "";
-        const s = String(v);
-        return (s.includes(",") || s.includes('"') || s.includes("\n"))
-          ? '"' + s.replaceAll('"', '""') + '"' : s;
-      }).join(",");
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
     function triggerDownload(content, filename) {
-      const url = URL.createObjectURL(new Blob([content], { type: "text/csv" }));
+      const blob = content instanceof Blob ? content : new Blob([content], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
       const a = Object.assign(document.createElement("a"), { href: url, download: filename });
       a.click();
       URL.revokeObjectURL(url);
@@ -462,10 +437,29 @@
       },
     });
 
-    // ── CSV classifier (SSE) ──────────────────────────────────────────────────
+    // ── CSV classifier (background job + polling) ─────────────────────────────
     const csvProgressWrap  = document.getElementById("csvProgress");
     const csvProgressFill  = document.getElementById("csvProgressFill");
     const csvProgressLabel = document.getElementById("csvProgressLabel");
+
+    async function pollUntilDone(jobId, total, showStatus) {
+      while (true) {
+        await new Promise(r => setTimeout(r, 1500));
+        const res = await fetch(`${API_BASE}/classify-csv/${jobId}`);
+        if (!res.ok) throw new Error("Failed to poll job status");
+        const data = await res.json();
+
+        if (data.status === "error") throw new Error(data.error || "Classification failed");
+
+        const progress = data.progress ?? 0;
+        const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
+        csvProgressFill.style.width = pct + "%";
+        csvProgressLabel.textContent = `${progress} / ${total} classified`;
+        showStatus("loading", `<span class="spinner"></span>Classifying ${progress} / ${total}…`);
+
+        if (data.status === "done") return data;
+      }
+    }
 
     createUploadWidget({
       dropZoneId: "csvDropZone", fileInputId: "csvFileInput", filePreviewId: "csvFilePreview",
@@ -482,38 +476,27 @@
         const formData = new FormData();
         formData.append("file", file);
         try {
-          const res = await fetch(`${API_BASE}/classify-csv`, { method: "POST", body: formData });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ detail: res.statusText }));
-            throw new Error(err.detail || "Request failed");
+          const submitRes = await fetch(`${API_BASE}/classify-csv`, { method: "POST", body: formData });
+          if (!submitRes.ok) {
+            const err = await submitRes.json().catch(() => ({ detail: submitRes.statusText }));
+            throw new Error(err.detail || "Upload failed");
           }
+          const { job_id: jobId, total } = await submitRes.json();
 
-          let columns = [], rows = [], total = 0;
+          csvProgressWrap.classList.add("visible");
+          showStatus("loading", `<span class="spinner"></span>Classifying 0 / ${total}…`);
 
-          for await (const event of readSSE(res)) {
-            if (event.type === "start") {
-              total = event.total;
-              columns = event.columns;
-              csvProgressWrap.classList.add("visible");
-              showStatus("loading", `<span class="spinner"></span>Classifying 0 / ${total}…`);
+          await pollUntilDone(jobId, total, showStatus);
 
-            } else if (event.type === "row") {
-              rows.push(event.values.concat([event.category]));
-              const pct = Math.round((rows.length / total) * 100);
-              csvProgressFill.style.width = pct + "%";
-              csvProgressLabel.textContent = `${rows.length} / ${total} classified`;
-              showStatus("loading", `<span class="spinner"></span>Classifying ${rows.length} / ${total}…`);
+          const dlRes = await fetch(`${API_BASE}/classify-csv/${jobId}/download`);
+          if (!dlRes.ok) throw new Error("Download failed");
+          const disposition = dlRes.headers.get("Content-Disposition") || "";
+          const match = disposition.match(/filename=(\S+)/);
+          const filename = match ? match[1] : "classified.csv";
+          triggerDownload(await dlRes.blob(), filename);
 
-            } else if (event.type === "done") {
-              csvProgressWrap.classList.remove("visible");
-              triggerDownload([columns, ...rows].map(toCSVRow).join("\n"), event.filename);
-              showStatus("success", `Downloaded <strong>${event.filename}</strong> — ${rows.length} rows classified`);
-              return;
-
-            } else if (event.type === "error") {
-              throw new Error(event.message);
-            }
-          }
+          csvProgressWrap.classList.remove("visible");
+          showStatus("success", `Downloaded <strong>${filename}</strong> — ${total} rows classified`);
         } catch (err) {
           csvProgressWrap.classList.remove("visible");
           showStatus("error", `Error: ${err.message}`);

@@ -1,20 +1,41 @@
+import asyncio
 import io
-import json
-import math
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
+
+import pandas as pd
+from fastapi import BackgroundTasks, FastAPI, APIRouter, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+
+from config import settings
+from middleware.access_log import AccessLogMiddleware
+from services.job_store import Job, JobStore
 from services.pdf_extractor import PDFExtractor
 from services.transaction_classifier import TransactionClassifierService
-from middleware.access_log import AccessLogMiddleware
-from config import settings
-import pandas as pd
 
-app = FastAPI()
+
+job_store = JobStore()
+extractor = PDFExtractor()
+classifier = TransactionClassifierService()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async def _cleanup_loop():
+        while True:
+            await asyncio.sleep(300)
+            job_store.cleanup()
+
+    task = asyncio.create_task(_cleanup_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     AccessLogMiddleware,
     log_dir=settings.LOG_DIR,
@@ -27,8 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
-extractor = PDFExtractor()
-classifier = TransactionClassifierService()
+
 router = APIRouter(prefix="/api")
 
 PDF_MAGIC = b"%PDF"
@@ -39,22 +59,6 @@ CSV_CONTENT_TYPES = {CSV_MEDIA_TYPE, "application/csv", "text/plain", "applicati
 def _safe_stem(filename: str | None) -> str:
     stem = Path(filename).stem if filename else "transactions"
     return "".join(c for c in stem if c.isalnum() or c in "_-") or "transactions"
-
-
-def _json_safe(v):
-    """Convert numpy scalars and NaN to JSON-serialisable Python types."""
-    if hasattr(v, "item"):
-        v = v.item()
-    try:
-        if math.isnan(v):
-            return None
-    except TypeError:
-        pass
-    return v
-
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
 
 
 async def read_validated_pdf(file: UploadFile) -> bytes:
@@ -74,6 +78,27 @@ async def read_validated_csv(file: UploadFile) -> bytes:
         raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_CSV_BYTES} bytes")
     return data
 
+
+async def _run_classification(job: Job, df: pd.DataFrame) -> None:
+    job.status = "processing"
+    categories: list[str] = []
+    try:
+        async for _row_values, category in classifier.classify_stream(df):
+            categories.append(category)
+            job.progress += 1
+
+        result = df.copy()
+        result["Category"] = categories
+        job.result = result
+        job.status = "done"
+    except Exception as e:
+        job.status = "error"
+        job.error = str(e)
+
+
+# ---------------------------------------------------------------------------
+# PDF endpoints
+# ---------------------------------------------------------------------------
 
 @router.post(
     "/extract-text",
@@ -114,8 +139,7 @@ async def extract_csv(file: Annotated[UploadFile, File()]):
         df = extractor.extract_transaction_table(pdf_buffer)
         df = extractor.convert_amount_balance_to_numbers(df)
 
-        validation_status = extractor.is_valid_result(df)
-        if not validation_status:
+        if not extractor.is_valid_result(df):
             raise HTTPException(status_code=400, detail="Validation failed")
 
         csv_name = f"true_validation_{len(df)}.csv"
@@ -134,14 +158,22 @@ async def extract_csv(file: Annotated[UploadFile, File()]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# CSV classification — background job
+# ---------------------------------------------------------------------------
+
 @router.post(
     "/classify-csv",
+    status_code=202,
     responses={
         400: {"description": "Not a CSV or missing required column"},
         413: {"description": "File too large"},
     },
 )
-async def classify_csv(file: Annotated[UploadFile, File()]):
+async def classify_csv_submit(
+    background_tasks: BackgroundTasks,
+    file: Annotated[UploadFile, File()],
+):
     data = await read_validated_csv(file)
 
     try:
@@ -156,28 +188,52 @@ async def classify_csv(file: Annotated[UploadFile, File()]):
         )
 
     output_name = f"{_safe_stem(file.filename)}_classified.csv"
-    columns = list(df.columns) + ["Category"]
+    job = job_store.create(filename=output_name, total=len(df))
+    background_tasks.add_task(_run_classification, job, df)
 
-    async def generate():
-        try:
-            yield _sse({"type": "start", "total": len(df), "columns": columns})
-            async for row_values, category in classifier.classify_stream(df):
-                yield _sse({
-                    "type": "row",
-                    "values": [_json_safe(v) for v in row_values],
-                    "category": category,
-                })
-            yield _sse({"type": "done", "filename": output_name})
-        except Exception as e:
-            yield _sse({"type": "error", "message": str(e)})
+    return {"job_id": job.id, "total": job.total}
+
+
+@router.get(
+    "/classify-csv/{job_id}",
+    responses={404: {"description": "Job not found"}},
+)
+async def classify_csv_status(job_id: str):
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "progress": job.progress,
+        "total": job.total,
+        "error": job.error,
+    }
+
+
+@router.get(
+    "/classify-csv/{job_id}/download",
+    responses={
+        400: {"description": "Job not ready"},
+        404: {"description": "Job not found"},
+    },
+)
+async def classify_csv_download(job_id: str):
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done":
+        raise HTTPException(status_code=400, detail=f"Job is not ready (status: {job.status})")
+
+    buf = io.StringIO()
+    job.result.to_csv(buf, index=False)
+    buf.seek(0)
 
     return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        iter([buf.getvalue()]),
+        media_type=CSV_MEDIA_TYPE,
+        headers={"Content-Disposition": f"attachment; filename={job.filename}"},
     )
 
 
