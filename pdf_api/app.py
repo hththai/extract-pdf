@@ -15,12 +15,12 @@ from config import settings
 from middleware.access_log import AccessLogMiddleware
 from services.job_store import Job, JobStore
 from services.pdf_extractor import PDFExtractor
-from services.transaction_classifier import TransactionClassifierService
+from services.transaction_classifier import BatchTransactionClassifierService
 
 
 job_store = JobStore()
 extractor = PDFExtractor()
-classifier = TransactionClassifierService()
+classifier = BatchTransactionClassifierService()
 
 
 @asynccontextmanager
@@ -81,15 +81,12 @@ async def read_validated_csv(file: UploadFile) -> bytes:
 
 async def _run_classification(job: Job, df: pd.DataFrame) -> None:
     job.status = "processing"
-    categories: list[str] = []
     try:
-        async for _row_values, category in classifier.classify_stream(df):
-            categories.append(category)
-            job.progress += 1
-
-        result = df.copy()
-        result["Category"] = categories
-        job.result = result
+        job.result = await classifier.classify_dataframe(
+            df,
+            on_progress=lambda n: setattr(job, "progress", n),
+        )
+        job.progress = job.total
         job.status = "done"
     except Exception as e:
         job.status = "error"
