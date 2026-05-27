@@ -117,12 +117,11 @@ class BatchTransactionClassifierService:
       an unexpected response shape
     """
 
-    CHUNK_SIZE = 20
-
     def __init__(self):
         self._base_url = settings.AI_BASE_URL.rstrip("/")
         self._model = settings.AI_MODEL
         self._timeout = httpx.Timeout(120.0)  # batch calls take longer
+        self._chunk_size = settings.AI_CLASSIFY_CHUNK_SIZE
         self._categories = [c.strip() for c in settings.AI_CLASSIFY_CATEGORIES.split(",")]
         self._batch_prompt = self._build_batch_prompt()
         self._single_prompt = self._build_single_prompt()
@@ -177,8 +176,8 @@ class BatchTransactionClassifierService:
         on_progress: Callable[[int], None] | None,
     ) -> list[str]:
         all_categories: list[str] = []
-        for start in range(0, len(details), self.CHUNK_SIZE):
-            chunk = details[start : start + self.CHUNK_SIZE]
+        for start in range(0, len(details), self._chunk_size):
+            chunk = details[start : start + self._chunk_size]
             chunk_cats = await self._classify_chunk(client, chunk)
             all_categories.extend(chunk_cats)
             if on_progress:

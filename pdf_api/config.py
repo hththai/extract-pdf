@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     AI_MODEL: str = "llama3.2"
     AI_REQUEST_TIMEOUT: int = 30
     AI_CLASSIFY_CONCURRENCY: int = 10
+    AI_CLASSIFY_CHUNK_SIZE: int = 40
     AI_CLASSIFY_CATEGORIES: str = (
         "Food and Dining,Transport and Travel,Shopping and Retail,"
         "Utilities and Bills,Health and Medical,Entertainment and Leisure,"
