@@ -521,7 +521,7 @@
 
     async function pollUntilDone(jobId, total, showStatus) {
       while (true) {
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, Number("${POLL_INTERVAL_MS}")));
         const res = await fetch(`${API_BASE}/classify-csv/${jobId}`);
         if (!res.ok) throw new Error("Failed to poll job status");
         const data = await res.json();

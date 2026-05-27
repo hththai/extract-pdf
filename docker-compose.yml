@@ -38,6 +38,7 @@ services:
       - "${CLIENT_PORT:-80}:80"
     environment:
       - API_URL=${API_URL:-http://localhost:8000}
+      - POLL_INTERVAL_MS=${POLL_INTERVAL_MS:-2000}
     volumes:
       - ./logs/client:/var/log/nginx
     depends_on:
