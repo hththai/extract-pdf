@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, APIRouter, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -237,6 +238,17 @@ async def classify_csv_download(job_id: str):
 @router.get("/status")
 async def health_check():
     return {"status": "OK"}
+
+
+@router.get("/ai-status")
+async def ai_status():
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{settings.AI_BASE_URL}/api/tags")
+            resp.raise_for_status()
+        return {"available": True}
+    except Exception:
+        return {"available": False}
 
 
 app.include_router(router)

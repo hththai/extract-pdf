@@ -40,6 +40,7 @@
       box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
       padding: 2.5rem 2rem;
       width: 100%;
+      position: relative;
     }
 
     .card-header {
@@ -246,6 +247,44 @@
       color: #991b1b;
     }
 
+    /* AI offline overlay */
+    .ai-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      z-index: 10;
+      text-align: center;
+      padding: 2rem;
+    }
+
+    .ai-overlay.visible {
+      display: flex;
+    }
+
+    .ai-overlay-icon {
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .ai-overlay-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #1d1d1f;
+    }
+
+    .ai-overlay-sub {
+      font-size: 0.8rem;
+      color: #6e6e73;
+    }
+
     /* Progress bar */
     .progress-wrap {
       display: none;
@@ -308,7 +347,12 @@
     </div>
 
     <!-- Transaction Classifier -->
-    <div class="card">
+    <div class="card" id="classifierCard">
+      <div class="ai-overlay visible" id="aiOverlay">
+        <div class="ai-overlay-icon">⏳</div>
+        <div class="ai-overlay-title" id="aiOverlayTitle">Checking AI service…</div>
+        <div class="ai-overlay-sub" id="aiOverlaySub"></div>
+      </div>
       <div class="card-header">
         <h1>Transaction Classifier</h1>
         <span class="trial-badge">Trial</span>
@@ -340,7 +384,7 @@
 
   </div>
 
-  <script>
+  <script type="module">
     const API_BASE = "${API_URL}";
 
     // ── Shared widget factory ─────────────────────────────────────────────────
@@ -436,6 +480,39 @@
         }
       },
     });
+
+    // ── AI availability check ─────────────────────────────────────────────────
+    const aiOverlay      = document.getElementById("aiOverlay");
+    const aiOverlayTitle = document.getElementById("aiOverlayTitle");
+    const aiOverlaySub   = document.getElementById("aiOverlaySub");
+
+    async function checkAIStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/ai-status`);
+        const { available } = await res.json();
+        if (available) {
+          aiOverlay.classList.remove("visible");
+        } else {
+          aiOverlayTitle.textContent = "AI service unavailable";
+          aiOverlaySub.textContent   = "Retrying…";
+          aiOverlay.classList.add("visible");
+        }
+      } catch {
+        aiOverlayTitle.textContent = "AI service unavailable";
+        aiOverlaySub.textContent   = "Retrying…";
+        aiOverlay.classList.add("visible");
+      }
+    }
+
+    let retries = 0;
+    await checkAIStatus();
+    const retryInterval = setInterval(async () => {
+      if (++retries >= 2 || !aiOverlay.classList.contains("visible")) {
+        clearInterval(retryInterval);
+        return;
+      }
+      await checkAIStatus();
+    }, 30000);
 
     // ── CSV classifier (background job + polling) ─────────────────────────────
     const csvProgressWrap  = document.getElementById("csvProgress");
